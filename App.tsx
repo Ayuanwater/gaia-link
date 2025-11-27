@@ -55,7 +55,8 @@ const TRANSLATIONS = {
     neuralStream: "Neural Stream",
     endSession: "End Session & Process Data",
     analyzing: "Analyzing Neural Patterns...",
-    synthesizing: "Synthesizing Archetypal Data..."
+    synthesizing: "Synthesizing Archetypal Data...",
+    apiKeyMissing: "Connection Error: API Key missing. Please set VITE_API_KEY in Vercel."
   },
   zh: {
     introTitle: "天地链接",
@@ -80,7 +81,8 @@ const TRANSLATIONS = {
     neuralStream: "脑电数据流",
     endSession: "结束会话并处理数据",
     analyzing: "正在分析脑电模式...",
-    synthesizing: "正在综合原型数据..."
+    synthesizing: "正在综合原型数据...",
+    apiKeyMissing: "连接错误：未找到 API 密钥。请在 Vercel 环境变量中设置 VITE_API_KEY。"
   }
 };
 
@@ -459,8 +461,14 @@ const GaiaLinkApp = () => {
     try {
       if (!chatSessionRef.current) {
           const chat = initAI(selectedPersona, language);
-          if (chat) chatSessionRef.current = chat;
-          else throw new Error("No AI");
+          if (chat) {
+              chatSessionRef.current = chat;
+          } else {
+            // ERROR: API KEY MISSING
+            alert(t.apiKeyMissing);
+            setAppState(AppState.INTRO);
+            return;
+          }
       }
       
       // --- MEIHUA ALGORITHM ---

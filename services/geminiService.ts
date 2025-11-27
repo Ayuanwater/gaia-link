@@ -137,13 +137,10 @@ const getSystemInstruction = (persona: Persona, language: Language) => {
 };
 
 export const initAI = (persona: Persona, language: Language): Chat | null => {
-  // Support both standard Node process.env (for local/compat) and Vite import.meta.env
-  // Vercel Vite deployments usually require variables to start with VITE_ to be exposed to client
-  // But we check both just in case.
-  const apiKey = (import.meta as any).env?.VITE_API_KEY || process.env.API_KEY;
+  const apiKey = process.env.API_KEY;
 
   if (!apiKey) {
-    console.error("API Key missing. Please set VITE_API_KEY in your environment variables.");
+    console.error("CRITICAL: API Key not found. Please ensure 'API_KEY' is set in your environment variables.");
     return null;
   }
 
