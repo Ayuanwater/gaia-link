@@ -108,7 +108,7 @@ const getSystemInstruction = (persona: Persona, language: Language) => {
     3 (Li/Fire): You sense they are burned out, moving too fast, or passionate but drained. (Fatigue)
     4 (Zhen/Wood): You sense they are restless, shocked, or unsettled. (Unstable)
     5 (Xun/Wood): You sense they are indecisive or scattered. (Confused)
-    6 (Kan/Water): You sense deep emotional undercurrents, fear, or sadness. (Melancholy)
+    6 (Kan/Water): You sense they are deep emotional undercurrents, fear, or sadness. (Melancholy)
     7 (Gen/Earth): You sense they feel blocked, stuck, or just need to stop and rest. (Stuck)
     8 (Kun/Earth): You sense they are giving too much of themselves to others. (Exhausted)
 
@@ -136,11 +136,36 @@ const getSystemInstruction = (persona: Persona, language: Language) => {
   `;
 };
 
+// Helper to safely retrieve API Key in both Node (process.env) and Vite (import.meta.env)
+const getApiKey = (): string | undefined => {
+  // 1. Try Vite Environment Variable (For Vercel/Web)
+  try {
+    // @ts-ignore
+    if (import.meta && import.meta.env && import.meta.env.VITE_API_KEY) {
+      // @ts-ignore
+      return import.meta.env.VITE_API_KEY;
+    }
+  } catch (e) {
+    // Ignore errors in environments where import.meta is not available
+  }
+
+  // 2. Try Node Process Environment (Fallback)
+  try {
+    if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+      return process.env.API_KEY;
+    }
+  } catch (e) {
+    // Ignore errors
+  }
+
+  return undefined;
+};
+
 export const initAI = (persona: Persona, language: Language): Chat | null => {
-  const apiKey = process.env.API_KEY;
+  const apiKey = getApiKey();
 
   if (!apiKey) {
-    console.error("CRITICAL: API Key not found. Please ensure 'API_KEY' is set in your environment variables.");
+    console.error("CRITICAL: API Key not found. Please ensure 'VITE_API_KEY' is set in your Vercel environment variables.");
     return null;
   }
 
