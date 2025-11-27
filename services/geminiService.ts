@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Chat } from "@google/genai";
 import { Persona, Language } from "../types";
 
@@ -138,12 +137,17 @@ const getSystemInstruction = (persona: Persona, language: Language) => {
 };
 
 export const initAI = (persona: Persona, language: Language): Chat | null => {
-  if (!process.env.API_KEY) {
-    console.error("API Key missing");
+  // Support both standard Node process.env (for local/compat) and Vite import.meta.env
+  // Vercel Vite deployments usually require variables to start with VITE_ to be exposed to client
+  // But we check both just in case.
+  const apiKey = (import.meta as any).env?.VITE_API_KEY || process.env.API_KEY;
+
+  if (!apiKey) {
+    console.error("API Key missing. Please set VITE_API_KEY in your environment variables.");
     return null;
   }
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: apiKey });
   
   return ai.chats.create({
     model: 'gemini-2.5-flash',
