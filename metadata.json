@@ -1,0 +1,9 @@
+{
+  "name": "Copy of Gaia Link: Neural Interface",
+  "description": "A meditative AI experience connecting users to nature personas (Sky Father & Earth Mother) via simulated or real EEG bluetooth data.",
+  "requestFramePermissions": [
+    "microphone",
+    "bluetooth",
+    "serial"
+  ]
+}
