@@ -7,13 +7,15 @@ interface EEGVisualizerProps {
   height?: number;
   showStatus?: boolean;
   isRealDevice?: boolean;
+  rawData?: number[]; // Array of raw EEG integers
 }
 
 export const EEGVisualizer: React.FC<EEGVisualizerProps> = ({ 
   state, 
   height = 100, 
   showStatus = false, 
-  isRealDevice = false 
+  isRealDevice = false,
+  rawData = []
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -26,68 +28,93 @@ export const EEGVisualizer: React.FC<EEGVisualizerProps> = ({
     let animationFrameId: number;
     let time = 0;
 
-    // Configuration based on state
-    const getConfig = (s: BrainwaveState) => {
+    const getColor = (s: BrainwaveState) => {
       switch(s) {
-        case 'CONNECTING': return { speed: 0.05, amplitude: 5, frequency: 0.05, color: '#d6d3d1' };
-        case 'CALM': return { speed: 0.02, amplitude: 20, frequency: 0.01, color: '#4ade80' }; // Green
-        case 'FOCUS': return { speed: 0.05, amplitude: 40, frequency: 0.03, color: '#60a5fa' }; // Blue
-        case 'STRESSED': return { speed: 0.08, amplitude: 60, frequency: 0.08, color: '#ef4444' }; // Red
-        case 'IDLE': default: return { speed: 0.01, amplitude: 5, frequency: 0.005, color: '#78716c' }; // Grey
+        case 'CONNECTING': return '#d6d3d1';
+        case 'CALM': return '#4ade80'; // Green
+        case 'FOCUS': return '#60a5fa'; // Blue
+        case 'STRESSED': return '#ef4444'; // Red
+        case 'IDLE': 
+        default: return '#78716c'; // Stone
       }
     };
 
     const render = () => {
       if (!canvas) return;
-      const { width, height } = canvas.getBoundingClientRect();
-      canvas.width = width;
-      canvas.height = height;
+      // Handle resizing
+      const { width: rectWidth, height: rectHeight } = canvas.getBoundingClientRect();
+      if (canvas.width !== rectWidth || canvas.height !== rectHeight) {
+          canvas.width = rectWidth;
+          canvas.height = rectHeight;
+      }
       
-      const config = getConfig(state);
+      const width = canvas.width;
+      const height = canvas.height;
+      const color = getColor(state);
       
       ctx.clearRect(0, 0, width, height);
       
       if (state === 'CONNECTING') {
-         // Scanning line effect
-         ctx.strokeStyle = `rgba(255, 255, 255, ${Math.abs(Math.sin(time * 2))})`;
+         // Scanning line effect (simulated solely for UI state indication, not data)
+         ctx.strokeStyle = `rgba(255, 255, 255, ${Math.abs(Math.sin(time * 0.05))})`;
          ctx.lineWidth = 1;
          ctx.beginPath();
          ctx.moveTo(0, height/2);
          ctx.lineTo(width, height/2);
          ctx.stroke();
+         time += 1;
       } else {
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = config.color;
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = color;
+          ctx.shadowBlur = 5;
+          ctx.shadowColor = color;
           ctx.beginPath();
 
-          for (let x = 0; x < width; x++) {
-            // Superposition of sine waves to look like EEG
-            const y1 = Math.sin(x * config.frequency + time) * config.amplitude;
-            const y2 = Math.sin(x * (config.frequency * 2.5) + time * 1.5) * (config.amplitude * 0.5);
-            // Add "Real" jitter if device is connected to simulate raw data noise
-            const noise = (Math.random() - 0.5) * (state === 'STRESSED' ? 10 : 2) * (isRealDevice ? 1.5 : 1);
-            
-            const y = height / 2 + y1 + y2 + noise;
-            
-            if (x === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
+          // Use provided rawData or default to empty
+          // Accessing the mutable array reference directly for performance
+          const buffer = rawData; 
+          
+          if (buffer && buffer.length > 1) {
+             // We display the data available.
+             // Auto-scaling: We assume a typical EEG range of +/- 1000uV for full height.
+             // If the signal is weak, it will look small (which is realistic).
+             // Center is height / 2.
+             const scale = height / 2000; 
+
+             // We spread the data across the width of the canvas
+             // If buffer is 512 long, and width is 300, we downsample or squeeze.
+             // Simple approach: linear distribution
+             const step = width / (buffer.length - 1);
+
+             for (let i = 0; i < buffer.length; i++) {
+                 const x = i * step;
+                 // Invert Y axis so positive is up
+                 // Clamp values loosely to avoid drawing way off canvas
+                 let val = buffer[i];
+                 const y = (height / 2) - (val * scale);
+                 
+                 if (i === 0) ctx.moveTo(x, y);
+                 else ctx.lineTo(x, y);
+             }
+          } else {
+             // Flatline
+             ctx.moveTo(0, height / 2);
+             ctx.lineTo(width, height / 2);
           }
           
           ctx.stroke();
           
-          // Glow effect
-          ctx.shadowBlur = 10;
-          ctx.shadowColor = config.color;
+          // Reset shadow for next frame or other operations
+          ctx.shadowBlur = 0;
       }
       
-      time += config.speed;
       animationFrameId = requestAnimationFrame(render);
     };
 
     render();
 
     return () => cancelAnimationFrame(animationFrameId);
-  }, [state, isRealDevice]);
+  }, [state, isRealDevice, rawData, height]); // rawData ref dependency is fine
 
   return (
     <div className="relative w-full">

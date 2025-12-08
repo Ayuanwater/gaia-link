@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GenerateContentResponse, Chat } from "@google/genai";
 import { 
@@ -10,7 +9,11 @@ import {
   Usb,
   Settings,
   StopCircle,
-  Globe
+  Globe,
+  Activity,
+  Zap,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 
 // Types & Services
@@ -45,17 +48,17 @@ const TRANSLATIONS = {
     motherName: "Earth Mother (Intellectual/Gentle)",
     motherDesc: "Pattern Recognition: HOLISTIC",
     step1Title: "Stabilize Alpha Waves (Sync)",
-    step1Desc: "Calm your mind. The system is calibrating baseline.",
+    step1Desc: "Calm your mind. Generating Upper Trigram data.",
     step2Title: "Engage Beta Waves (Focus)",
-    step2Desc: "Concentrate on the objective. Locking active signal.",
+    step2Desc: "Concentrate on objective. Generating Lower Trigram data.",
     linkStabilized: "Neural Link Stabilized",
     awaitingInput: "Awaiting input stream...",
-    signalOptimal: "Signal: Optimal",
-    signalAdjust: "Signal: Adjust Sensor",
+    signalOptimal: "Signal: Strong",
+    signalAdjust: "Signal: Weak/Noise",
     neuralStream: "Neural Stream",
     endSession: "End Session & Process Data",
     analyzing: "Analyzing Neural Patterns...",
-    synthesizing: "Synthesizing Archetypal Data...",
+    synthesizing: "Consulting The Oracle...",
     apiKeyMissing: "Connection Error: API Key missing. Please set VITE_API_KEY in Vercel."
   },
   zh: {
@@ -71,17 +74,17 @@ const TRANSLATIONS = {
     motherName: "地母 (知性/温柔)",
     motherDesc: "模式识别：整体",
     step1Title: "稳定 Alpha 波 (同步)",
-    step1Desc: "平静思绪。系统正在校准基线。",
+    step1Desc: "平静思绪。正在生成上卦数据。",
     step2Title: "激活 Beta 波 (聚焦)",
-    step2Desc: "专注于目标。锁定活跃信号。",
+    step2Desc: "专注于目标。正在生成下卦数据。",
     linkStabilized: "链接已稳定",
     awaitingInput: "等待回应...",
-    signalOptimal: "信号：最佳",
-    signalAdjust: "信号：调整传感器",
+    signalOptimal: "信号：强",
+    signalAdjust: "信号：弱/噪音",
     neuralStream: "脑电数据流",
     endSession: "结束会话并处理数据",
     analyzing: "正在分析脑电模式...",
-    synthesizing: "正在综合原型数据...",
+    synthesizing: "正在推演卦象...",
     apiKeyMissing: "连接错误：未找到 API 密钥。请在 Vercel 环境变量中设置 VITE_API_KEY。"
   }
 };
@@ -149,6 +152,29 @@ const TG_SYNC = 0xAA;
 const CODE_SIGNAL_QUALITY = 0x02;
 const CODE_ATTENTION = 0x04;
 const CODE_MEDITATION = 0x05;
+const CODE_RAW_WAVE = 0x80; // Raw Wave Value (16-bit)
+
+// ----------------------------------------------------------------------
+// METRIC CALCULATION: RMS (Root Mean Square) for 1-99 Mapping
+// ----------------------------------------------------------------------
+const calculateRawMetric = (rawBuffer: number[]): number => {
+    if (rawBuffer.length === 0) return 8; // Default fallback for Divination
+
+    // 1. Calculate RMS (Energy)
+    const sumSquares = rawBuffer.reduce((sum, val) => sum + (val * val), 0);
+    const rms = Math.sqrt(sumSquares / rawBuffer.length);
+
+    // 2. Normalize based on typical NeuroSky Raw range
+    // Raw values are signed 16-bit but effective EEG usually is < 1500
+    const MAX_EXPECTED_RMS = 1200; 
+    
+    let normalized = rms / MAX_EXPECTED_RMS;
+    if (normalized > 1) normalized = 1;
+    if (normalized < 0.01) normalized = 0.01; // Avoid 0
+
+    // 3. Map to 1-99
+    return Math.floor(normalized * 98) + 1;
+};
 
 const GaiaLinkApp = () => {
   // App Flow State
@@ -170,12 +196,21 @@ const GaiaLinkApp = () => {
   const [bluetoothDevice, setBluetoothDevice] = useState<BluetoothDevice | null>(null);
   const [serialPort, setSerialPort] = useState<SerialPort | null>(null);
   
-  // NeuroSky Data
+  // NeuroSky Data (Processed)
   const [signalQuality, setSignalQuality] = useState<number>(200); 
   const [attention, setAttention] = useState<number>(0);
   const [meditation, setMeditation] = useState<number>(0);
 
-  // Hidden Divination Data Capture
+  // RAW DATA BUFFERS (For 1-99 Mapping)
+  const rawEEGBufferRef = useRef<number[]>([]);
+  // We store snippets to send to AI as proof of reality
+  const capturedSnapshotsRef = useRef<{ 
+    upperRaw: number[], 
+    lowerRaw: number[],
+    upperVal: number | null,
+    lowerVal: number | null
+  }>({ upperRaw: [], lowerRaw: [], upperVal: null, lowerVal: null });
+
   const [capturedAlpha, setCapturedAlpha] = useState<number | null>(null);
   const [capturedBeta, setCapturedBeta] = useState<number | null>(null);
 
@@ -218,15 +253,32 @@ const GaiaLinkApp = () => {
 
   /**
    * ----------------------------------------------------------------
-   * NEUROSKY PARSING
+   * NEUROSKY PARSING (RAW WAVE SUPPORT)
    * ----------------------------------------------------------------
    */
   const parsePacketPayload = (payload: number[]) => {
       let i = 0;
       while (i < payload.length) {
           const code = payload[i];
+
           if (code >= 0x80) {
-              const len = payload[i + 1]; 
+              const len = payload[i + 1];
+              
+              // RAW WAVE VALUE (0x80) - Length 2
+              if (code === CODE_RAW_WAVE && len === 2) {
+                  // Big Endian 16-bit signed
+                  const high = payload[i + 2];
+                  const low = payload[i + 3];
+                  let val = (high << 8) | low;
+                  if (val >= 32768) val -= 65536; // Two's complement
+                  
+                  // Push to buffer
+                  rawEEGBufferRef.current.push(val);
+                  if (rawEEGBufferRef.current.length > 512) { // Keep last ~1 second
+                      rawEEGBufferRef.current.shift();
+                  }
+              }
+
               i += 2 + len;
           } else {
               const val = payload[i + 1];
@@ -335,24 +387,43 @@ const GaiaLinkApp = () => {
   };
 
   const simulateData = () => {
-      // For testing without device
       setEegConnected(true);
       setRitualStep(RitualStep.SYNC);
       setEegState('CALM');
+      
+      let lastRawVal = 0;
+
       const interval = setInterval(() => {
-          setMeditation(Math.floor(Math.random() * 40) + 40); // 40-80
-          setAttention(Math.floor(Math.random() * 40) + 40); // 40-80
-          setSignalQuality(0);
-      }, 1000);
+          setMeditation(Math.floor(Math.random() * 60) + 30); 
+          setAttention(Math.floor(Math.random() * 60) + 30); 
+          setSignalQuality(0); 
+          
+          // Generate simulated Raw Data (Random Walk for continuity)
+          const fakeRaw = [];
+          for(let i=0; i<50; i++) {
+              // 1/f noise approximation (random walk)
+              // Clamped between -800 and 800 roughly
+              const delta = (Math.random() - 0.5) * 80;
+              lastRawVal += delta;
+              // Dampen back to 0 to prevent drifting to infinity
+              lastRawVal *= 0.98;
+              
+              fakeRaw.push(Math.floor(lastRawVal));
+          }
+          
+          rawEEGBufferRef.current.push(...fakeRaw);
+          if (rawEEGBufferRef.current.length > 512) rawEEGBufferRef.current.splice(0, 50);
+
+      }, 100);
       return () => clearInterval(interval);
   };
 
   /**
    * ----------------------------------------------------------------
-   * RITUAL LOGIC
+   * RITUAL LOGIC (With RAW Mapping)
    * ----------------------------------------------------------------
    */
-  // Initialization of Chat session for Whispers
+  // Initialization of Chat session
   useEffect(() => {
      if (eegConnected && !chatSessionRef.current) {
         const chat = initAI(selectedPersona, language);
@@ -363,7 +434,7 @@ const GaiaLinkApp = () => {
   useEffect(() => {
       if (!eegConnected) return;
 
-      // Visualizer State Logic
+      // Visualizer State
       if (ritualStep === RitualStep.SYNC || ritualStep === RitualStep.COMMUNION) {
           if (meditation > 40) setEegState('CALM');
           else setEegState('IDLE');
@@ -372,22 +443,29 @@ const GaiaLinkApp = () => {
           else setEegState('STRESSED');
       }
 
-      // Signal Quality Check
-      if (signalQuality > 50 && !(!bluetoothDevice && !serialPort)) { 
+      // Signal Check
+      if (signalQuality > 25 && !(!bluetoothDevice && !serialPort)) { 
           if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
           return;
       }
 
-      // --- STEP 1: SYNC (Capture Alpha) ---
+      // --- STEP 1: SYNC (Upper Trigram) ---
       if (ritualStep === RitualStep.SYNC) {
-          if (meditation > 35) {
+          if (meditation > 10) { 
              if (!captureTimeoutRef.current) {
                  captureTimeoutRef.current = setTimeout(() => {
-                     setCapturedAlpha(meditationRef.current);
+                     // CAPTURE RAW METRIC
+                     const snapshot = [...rawEEGBufferRef.current].slice(-50); // Take last 50 samples
+                     const mappedVal = calculateRawMetric(rawEEGBufferRef.current);
+                     
+                     setCapturedAlpha(mappedVal);
+                     capturedSnapshotsRef.current.upperRaw = snapshot;
+                     capturedSnapshotsRef.current.upperVal = mappedVal;
+
                      setRitualStep(RitualStep.FOCUS);
                      setEegState('FOCUS');
                      captureTimeoutRef.current = null;
-                 }, 2500); 
+                 }, 3000); 
              }
           } else {
               if (captureTimeoutRef.current) {
@@ -396,17 +474,23 @@ const GaiaLinkApp = () => {
               }
           }
       } 
-      // --- STEP 2: FOCUS (Capture Beta) ---
+      // --- STEP 2: FOCUS (Lower Trigram) ---
       else if (ritualStep === RitualStep.FOCUS) {
-          if (attention > 35) {
+          if (attention > 10) {
               if (!captureTimeoutRef.current) {
                   captureTimeoutRef.current = setTimeout(() => {
-                      setCapturedBeta(attentionRef.current);
-                      // Move to Communion instead of straight to Chat
+                      // CAPTURE RAW METRIC
+                      const snapshot = [...rawEEGBufferRef.current].slice(-50);
+                      const mappedVal = calculateRawMetric(rawEEGBufferRef.current);
+
+                      setCapturedBeta(mappedVal);
+                      capturedSnapshotsRef.current.lowerRaw = snapshot;
+                      capturedSnapshotsRef.current.lowerVal = mappedVal;
+
                       setRitualStep(RitualStep.COMMUNION);
                       setEegState('CALM'); 
                       captureTimeoutRef.current = null;
-                  }, 2500);
+                  }, 3000);
               }
           } else {
                if (captureTimeoutRef.current) {
@@ -417,15 +501,13 @@ const GaiaLinkApp = () => {
       }
   }, [ritualStep, attention, meditation, signalQuality, eegConnected]);
 
-  // --- WHISPER LOGIC (COMMUNION STEP) ---
+  // --- WHISPER LOGIC ---
   useEffect(() => {
       if (ritualStep === RitualStep.COMMUNION) {
           const fetchWhisper = async () => {
               if (!chatSessionRef.current) return;
               try {
-                  const stateDesc = meditationRef.current > 50 ? "Relaxed/Stable" : attentionRef.current > 50 ? "Focused/Active" : "Unstable";
-                  const prompt = `[MODE: WHISPER] Current State: ${stateDesc}. Give me one short, factual sentence observing my mental state. No metaphors. Professional tone. e.g. "Neural stability is increasing." or "Focus levels are fluctuating."`;
-                  
+                  const prompt = `[SYSTEM: WHISPER_MODE] Current Raw RMS Energy: ${calculateRawMetric(rawEEGBufferRef.current)}. Provide one short, mystical sentence about my neural stability.`;
                   const result = await chatSessionRef.current.sendMessage({ message: prompt });
                   if (result.text) {
                       setCommunionWhisper(result.text);
@@ -434,11 +516,8 @@ const GaiaLinkApp = () => {
                   console.log("Whisper error", e);
               }
           };
-
-          // Fetch immediately then every 8 seconds
           fetchWhisper();
           whisperIntervalRef.current = setInterval(fetchWhisper, 8000);
-
           return () => {
               if (whisperIntervalRef.current) clearInterval(whisperIntervalRef.current);
           };
@@ -448,7 +527,7 @@ const GaiaLinkApp = () => {
 
   /**
    * ----------------------------------------------------------------
-   * FINAL ANALYSIS
+   * FINAL ANALYSIS (JSON PACKET SEND)
    * ----------------------------------------------------------------
    */
   const finishRitualAndChat = async () => {
@@ -464,28 +543,26 @@ const GaiaLinkApp = () => {
           if (chat) {
               chatSessionRef.current = chat;
           } else {
-            // ERROR: API KEY MISSING
             alert(t.apiKeyMissing);
             setAppState(AppState.INTRO);
             return;
           }
       }
       
-      // --- MEIHUA ALGORITHM ---
-      const num1 = capturedAlpha || 8; 
-      const num2 = capturedBeta || 8;
-      let upper = num1 % 8; if (upper === 0) upper = 8;
-      let lower = num2 % 8; if (lower === 0) lower = 8;
-      let moving = (num1 + num2) % 6; if (moving === 0) moving = 6;
+      const num1 = capturedSnapshotsRef.current.upperVal || 8; 
+      const num2 = capturedSnapshotsRef.current.lowerVal || 8;
+      
+      // CONSTRUCT JSON PACKET FOR AI
+      // We send real raw snippets to prove to the AI this isn't hallucinated.
+      const dataPacket = {
+          intention: intention,
+          upper_trigram_metric: num1,
+          lower_trigram_metric: num2,
+          raw_sample_snippet: capturedSnapshotsRef.current.upperRaw.slice(0, 10), // Send first 10 for context
+          device_status: "Active/Realtime"
+      };
 
-      const prompt = `
-        [MODE: PARENTAL_CONNECTION]
-        [INPUT_ENERGY: Upper=${upper}, Lower=${lower}]
-        [INTENTION: "${intention}"]
-        INSTRUCTION: Act as my ${selectedPersona}. Read my energy state from the inputs (do not mention numbers). 
-        1. Start with warm, parental comfort about my current state (e.g. if I seem tired/stressed/happy).
-        2. Then, only if I asked a question in my intention, guide me gently.
-      `;
+      const prompt = JSON.stringify(dataPacket, null, 2);
 
       const result = await chatSessionRef.current.sendMessageStream({ message: prompt });
       setAppState(AppState.CHAT);
@@ -531,7 +608,7 @@ const GaiaLinkApp = () => {
     } finally { setIsAiThinking(false); }
   };
 
-  // --- RENDER HELPERS ---
+  // --- RENDER HELPERS (Unchanged) ---
   const renderLanguageSelect = () => (
     <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center space-y-12 animate-fade-in">
        <div className="flex items-center gap-3">
@@ -603,7 +680,7 @@ const GaiaLinkApp = () => {
     const isCommunion = ritualStep === RitualStep.COMMUNION;
     
     // Coin Glow Logic
-    const isGlowing = (isStep1 && meditation > 35) || (isStep2 && attention > 35) || isCommunion;
+    const isGlowing = (isStep1 && meditation > 10) || (isStep2 && attention > 10) || isCommunion;
     const isLocked = (isStep1 && capturedAlpha !== null) || (isStep2 && capturedBeta !== null) || isCommunion;
 
     return (
@@ -669,19 +746,44 @@ const GaiaLinkApp = () => {
                     )}
                 </div>
 
-                {/* 3. EEG VISUALIZER */}
-                <div className="w-full max-w-lg bg-nature-deep/40 p-6 rounded-2xl border border-nature-earth/10 mt-4 backdrop-blur-sm relative overflow-hidden">
+                {/* 3. EEG VISUALIZER & STATS */}
+                <div className="w-full max-w-lg bg-nature-deep/40 p-6 rounded-2xl border border-nature-earth/10 mt-4 backdrop-blur-sm relative overflow-hidden group">
                     <div className="flex justify-between items-center mb-2 px-1 relative z-10">
-                        <span className="text-[10px] text-nature-earth uppercase tracking-widest font-mono">{t.neuralStream}</span>
-                        {signalQuality < 50 && <span className="text-[10px] text-nature-moss animate-pulse font-mono">{t.signalOptimal}</span>}
-                        {signalQuality >= 50 && <span className="text-[10px] text-amber-500 animate-pulse font-mono">{t.signalAdjust}</span>}
+                        <span className="text-[10px] text-nature-earth uppercase tracking-widest font-mono flex items-center gap-2">
+                           <Activity size={10} /> {t.neuralStream}
+                        </span>
+                        {/* Signal Quality: 0 is Good, 200 is Bad */}
+                        {signalQuality < 26 ? (
+                          <span className="text-[10px] text-nature-moss font-mono flex items-center gap-1">
+                            <Wifi size={10} /> {t.signalOptimal}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-amber-500 font-mono flex items-center gap-1 animate-pulse">
+                             <WifiOff size={10} /> {t.signalAdjust} ({signalQuality})
+                          </span>
+                        )}
                     </div>
+                    
+                    {/* VISUALIZER */}
                     <EEGVisualizer 
                         state={eegState} 
                         height={120} 
                         showStatus={false} 
                         isRealDevice={eegConnected} 
+                        rawData={rawEEGBufferRef.current} // Updated to pass rawData
                     />
+
+                    {/* LIVE NUMBERS OVERLAY */}
+                    <div className="flex justify-around mt-4 pt-4 border-t border-nature-earth/10">
+                         <div className={`flex flex-col items-center transition-colors duration-500 ${isStep1 ? 'opacity-100' : 'opacity-40'}`}>
+                            <span className="text-[10px] uppercase text-nature-earth tracking-widest mb-1">Meditation (Alpha)</span>
+                            <span className="font-display text-2xl text-nature-moss">{meditation}</span>
+                         </div>
+                         <div className={`flex flex-col items-center transition-colors duration-500 ${isStep2 ? 'opacity-100' : 'opacity-40'}`}>
+                            <span className="text-[10px] uppercase text-nature-earth tracking-widest mb-1">Attention (Beta)</span>
+                            <span className="font-display text-2xl text-sky-400">{attention}</span>
+                         </div>
+                    </div>
                 </div>
 
                 {/* 4. DISCONNECT BUTTON (COMMUNION ONLY) */}
@@ -728,6 +830,7 @@ const GaiaLinkApp = () => {
           isRealDevice={eegConnected}
           persona={selectedPersona}
           language={language}
+          rawData={rawEEGBufferRef.current}
         />
       )}
     </div>

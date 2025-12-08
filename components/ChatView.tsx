@@ -20,6 +20,7 @@ interface ChatViewProps {
   isRealDevice: boolean;
   persona: Persona;
   language: Language;
+  rawData: number[]; // Added rawData prop
 }
 
 const UI_TEXT = {
@@ -59,7 +60,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onResetEEG,
   isRealDevice,
   persona,
-  language
+  language,
+  rawData
 }) => {
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -98,7 +100,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
           </div>
         </div>
         <div className="w-24 md:w-40 h-10 block">
-           <EEGVisualizer state={eegState} height={40} showStatus={false} isRealDevice={isRealDevice} />
+           <EEGVisualizer state={eegState} height={40} showStatus={false} isRealDevice={isRealDevice} rawData={rawData} />
         </div>
       </div>
 
